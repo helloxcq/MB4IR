@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>DenseRetriver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <script type="text/javascript"></script>
+
+  <!-- Element-UI core CSS -->
+  <link rel="stylesheet" type="text/css" href="js/ElementUI/theme-chalk/index.css">
+
+  <link rel="stylesheet" type="text/css" href="css/customed.css">
+  <link rel="stylesheet" type="text/css" href="css/clean-blog.min.css">
+</head>
+
+<body>
+  <div class="container-fluid" id="app">
+    <!-- <div class="slider">
+      <div class="slider-logo"></div>
+      <img src="img/slider1.jpeg" class="slider-img">
+    </div>
+     -->
+    <div class="head">
+      <p style="font-weight: bold; font-size: 32px;text-align: center;">THUNLP</p>
+    </div>
+    
+    <div class="container" >
+      <el-input class="search-box"
+      v-model="question"
+      clearable
+      @keyup.enter.native="search"
+      style="width: 650px;"
+      icon="el-icon-search"></el-input>&nbsp;&nbsp;
+      <el-button @click="search" type="primary">搜索</el-button>
+      <el-button @click="clearQuestion" type="danger">清空</el-button>
+    </div>
+    <div class="search-result" id="search-result" v-if="show_result">
+      <div class="mb4ir">
+        <h3>MB4IR:</h3>
+        <div v-for="(item, index) in mb4kr_content">
+          <h4>Prediction {{ index + 1 }}: <b>{{ item.prediction }}</b></h4>
+          Title: {{ item.title}}<br>
+          f_score: {{ item.f_score | numFilter }}<br>
+          d_score: {{ item.d_score | numFilter }}<br>
+          p_score: {{ item.p_score | numFilter}}<br>
+          <!-- <p>{{ item.doc }}</p> -->
+          <div v-html="hightlight(item.doc, item.evidence)"></div>
+          <!-- <hr><br> -->
+          <el-divider><i class="el-icon-mobile-phone"></i></el-divider>
+        </div>
+      </div>
+      <div class="empty-space"></div>
+      <div class="kbqa">
+        <div class="kbqa-program">
+          <h3>Predicted Program:</h3>      
+          <canvas id="pred_program"></canvas><br>
+          <b id='pred_result_by_program'></b>
+          <!-- <hr><br> -->
+          <h3>Predicted SPARQL:</h3>
+          <pre id="pred_sparql" class="code-center">
+          </pre>
+          <b id='pred_result_by_sparql'></b>
+        </div>  
+      </div>
+    </div>
+  </div>
+</body>
+
+<!-- Vue开发环境版本，包含了有帮助的命令行警告 -->
+<script type="text/javascript" src="js/vue.2.6.14.js"></script>
+<script type="text/javascript" src="js/ElementUI/index.js"></script>
+
+<script type="text/javascript" src="js/dagre-0.8.5.min.js"></script>
+<script type="text/javascript" src="js/nomnoml.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/axios@0.12.0/dist/axios.min.js"></script>
+
+<script src='js/clean-blog.min.js'></script>
+<script>
+
+  function isEmptyOrSpaces(str) {
+    return str === null || str.match(/^ *$/) !== null
+  }
+
+  function f_i(f, i) {
+      return f + '-' + i
+  }
+  // let mb4kr_content = [{'prediction': 'nuclear issues', 'doc': 'TEHRAN, Iran (CNN) -- Iran\'s parliament speaker has criticized U.S. President-elect Barack Obama for saying that Iran\'s development of a nuclear weapon is unacceptable. Iranian President Mahmoud Ahmadinejad has outlined where he thinks U.S. policy needs to change. Ali Larijani said Saturday that Obama should apply his campaign message of change to U.S. dealings with Iran. "Obama must know that the change that he talks about is not simply a superficial changing of colors or tactics," Larijani said in comments carried by the semi-official Mehr News Agency. "What is expected is a change in strategy, not the repetition of objections to Iran\'s nuclear program, which will be taking a step in the wrong direction." In his first post-election news conference Friday afternoon, Obama reiterated that he believes a nuclear-armed Iran would be "unacceptable." He also said he would help mount an international effort to prevent it from happening. Larijani said that U.S. behavior toward Iran "will not change so simply" but that Obama\'s election showed internal conditions in the United States have shifted. He added that Iran does not mind if the United States provides other Persian Gulf countries with nuclear technology, but "you should know that you cannot prevent the Islamic Republic [from reaching its goals in the nuclear field]," according to the news agency. Obama cautioned Friday that it had only been a few days since the election and that he was not in office. "Obviously, how we approach and deal with a country like Iran is not something that we should simply do in a knee-jerk fashion. I think we\'ve got to think it through," Obama said. "But I have to reiterate once again that we only have one president at a time. And I want to be very careful that we are sending the right signals to the world as a whole that I am not the president, and I won\'t be until January 20th." Larijani was speaking two days after Iranian President Mahmoud Ahmadinejad congratulated Obama, the first time an Iranian leader has offered such wishes to a U.S. president-elect since the 1979 Islamic Revolution. One analyst said the welcome was a gesture from the hard-line president that he is open to a more conciliatory relationship with the United States. Ahmadinejad said Tehran "welcomes basic and fair changes in U.S. policies and conducts," according to the state-run Islamic Republic News Agency on Thursday. Relations between the United States and Iran have historically been chilly and have been further strained in recent years over Iran\'s nuclear program. Tehran insists that the program exists for peaceful purposes, but the United States and other Western nations are concerned by Iran\'s refusal to halt uranium enrichment activities. CNN\'s Shirzad Bozorgmehr contributed to this report.', 'p_score': 1.1425889730453491, 'd_score': 1.0, 'f_score': 1.1425889730453491, 'title': 'test'}]
+  function split_sparql(sparql) {
+    var space = '    ';
+    var clauses = [];
+    var cur_dep = 0;
+    for (var i = 0, j = 1; j < sparql.length - 1; j++) {
+      var c = sparql.charAt(j)
+      switch (c) {
+        case '.':
+          if (sparql.charAt(j - 1) == ' ' && sparql.charAt(j + 1) == ' ') {
+            clauses.push(space.repeat(cur_dep) + sparql.substr(i, j - i + 1).trim());
+            i = j + 1;
+          }
+          break
+        case '{':
+          if (sparql.charAt(j - 1) == ' ' && sparql.charAt(j + 1) == ' ') {
+            clauses.push(space.repeat(cur_dep) + sparql.substr(i, j - i).trim());
+            clauses.push(space.repeat(cur_dep) + '{');
+            i = j + 1;
+            cur_dep++;
+          }
+          break
+        case '}':
+          if (sparql.charAt(j - 1) == ' ' && sparql.charAt(j + 1) == ' ') {
+            cur_dep--;
+            clauses.push(space.repeat(cur_dep) + '}');
+            i = j + 1;
+          }
+          break
+        default:
+          break
+      }
+    }
+    if (j > i) clauses.push(sparql.substr(i, j - i + 1).trim());
+    clauses = clauses.filter(w => w.trim().length > 0);
+    var new_sparql = clauses.join('<br>');
+    return new_sparql;     
+  }
+
+  function hightlight(document, evidence) {
+    let docs = []
+    // raw value returned when empty start or unequal length of start/end
+    if(evidence.start.length === 0 || evidence.start.length != evidence.end.length) {
+      return document
+    }
+    // head html
+    if(evidence.start[0] != 0){
+      docs.push(document.substring(0, evidence.start[0]))
+    }
+    start = 0
+    let str = ''
+    evidence.forEach((s, e) => {
+      str = document.substring(start, s)
+      if(str != '') {
+        docs.push(str)
+      }
+      str = document.substring(s, e)
+      if(str != '') {
+        docs.push(str)
+      }
+      start = e
+    })
+
+    // tail html
+    str = document.substring(start, document.length)
+    if(str != '') {
+        docs.push(str)
+    }
+    return docs.join('')
+  }
+
+  let vm = new Vue({
+    el: '#app',
+    // delimiters: ['[[', ']]'],
+    data(){
+      return {
+        question: "",
+        value: 24,
+        show_result: true,
+        mb4kr_content: [{'evidence':{'start':[1,20,30], 'end':[9,26,40]},'prediction': 'nuclear issues', 'doc': 'TEHRAN, Iran (CNN) -- Iran\'s parliament speaker has criticized U.S. President-elect Barack Obama for saying that Iran\'s development of a nuclear weapon is unacceptable. Iranian President Mahmoud Ahmadinejad has outlined where he thinks U.S. policy needs to change. Ali Larijani said Saturday that Obama should apply his campaign message of change to U.S. dealings with Iran. "Obama must know that the change that he talks about is not simply a superficial changing of colors or tactics," Larijani said in comments carried by the semi-official Mehr News Agency. "What is expected is a change in strategy, not the repetition of objections to Iran\'s nuclear program, which will be taking a step in the wrong direction." In his first post-election news conference Friday afternoon, Obama reiterated that he believes a nuclear-armed Iran would be "unacceptable." He also said he would help mount an international effort to prevent it from happening. Larijani said that U.S. behavior toward Iran "will not change so simply" but that Obama\'s election showed internal conditions in the United States have shifted. He added that Iran does not mind if the United States provides other Persian Gulf countries with nuclear technology, but "you should know that you cannot prevent the Islamic Republic [from reaching its goals in the nuclear field]," according to the news agency. Obama cautioned Friday that it had only been a few days since the election and that he was not in office. "Obviously, how we approach and deal with a country like Iran is not something that we should simply do in a knee-jerk fashion. I think we\'ve got to think it through," Obama said. "But I have to reiterate once again that we only have one president at a time. And I want to be very careful that we are sending the right signals to the world as a whole that I am not the president, and I won\'t be until January 20th." Larijani was speaking two days after Iranian President Mahmoud Ahmadinejad congratulated Obama, the first time an Iranian leader has offered such wishes to a U.S. president-elect since the 1979 Islamic Revolution. One analyst said the welcome was a gesture from the hard-line president that he is open to a more conciliatory relationship with the United States. Ahmadinejad said Tehran "welcomes basic and fair changes in U.S. policies and conducts," according to the state-run Islamic Republic News Agency on Thursday. Relations between the United States and Iran have historically been chilly and have been further strained in recent years over Iran\'s nuclear program. Tehran insists that the program exists for peaceful purposes, but the United States and other Western nations are concerned by Iran\'s refusal to halt uranium enrichment activities. CNN\'s Shirzad Bozorgmehr contributed to this report.', 'p_score': 1.1425889730453491, 'd_score': 1.0, 'f_score': 1.1425889730453491, 'title': 'test'}]
+        // mb4kr_content: null
+      }
+    },
+    filters: {
+      numFilter(value) {
+        let realVal = "";
+        if (!isNaN(value) && value !== "") {
+          // 截取当前数据到小数点后两位,改变toFixed的值即可截取你想要的数值
+          realVal = parseFloat(value).toFixed(2);
+        } else {
+          realVal = "--";
+        }
+        return realVal;
+      },
+      hightlightFilter(document, evidence) {
+        return hightlight(document, evidence)
+      }
+    },
+    methods:{
+      search(){
+        if(isEmptyOrSpaces(this.question)){
+          console.log('Empty question')
+        } else {
+          this.show_result = true
+          this.get_mb4ir()
+          this.draw_kbqa()
+          console.log(this.mb4kr_content)
+        }
+      },
+      clearQuestion(){
+        this.question = ""
+        this.show_result = false
+        console.log(this.show_result)
+      },
+      hightlight(document, evidence) {
+        let docs = []
+        // raw value returned when empty start or unequal length of start/end
+        if(evidence.start.length === 0 || evidence.start.length != evidence.end.length) {
+          return document
+        }
+        // head html
+        if(evidence.start[0] != 0){
+          docs.push(document.substring(0, evidence.start[0]))
+        }
+        start = 0
+        let str = ''
+        evidence.start.forEach((s, index) => {
+          str = document.substring(start, s)
+          e = evidence.end[index]
+
+          if(str != '') {
+            docs.push(str)
+          }
+          str = `<span style="background-color:yellow">` + document.substring(s, e) + `</span>`
+          if(str != '') {
+            docs.push(str)
+          }
+          start = e
+        })
+
+        // tail html
+        str = document.substring(start, document.length)
+        if(str != '') {
+            docs.push(str)
+        }
+        return docs.join('')
+      },
+      get_mb4ir() {
+        let forData = new FormData()
+        axios.get('http://166.111.121.32:8890/query', {
+          params: { question: this.question }
+        }).then(
+          response => {
+            // console.log(response['data'])
+            // mb4ir = response['data']
+            // mb4ir_json = (new Function("return " + mb4ir))();
+            // this.mb4kr_content = mb4ir_json
+            // this.mb4kr_content.push(mb4ir_json[0])
+            // this.mb4kr_content.push(mb4ir_json)
+            console.log(this.mb4kr_content.length)
+            console.log(this.mb4kr_content)
+            // mb4ir.forEach()
+          }
+        ).catch(error => {
+          console.log(error)
+        })
+      },
+      draw_kbqa() {
+        let formData = new FormData()
+        formData.append('question', this.question)
+        axios.post('http://166.111.68.66:6060/', formData).then(
+          response => {
+            // console.log(response)
+            data = response['data']
+            let program = data['program']
+            let sparql = data['sparql']
+            let program_result = data['program_result']
+            let sparql_result = data['sparql_result']
+
+            // display program
+            var desc = [];
+            // console.log(program)
+            program.forEach((f, i) => {
+              desc.push('[' + f_i(f['func'], i) + (f['inputs'].length > 0 ? ('|' + f['inputs'].join(';')) : '') + ']');
+              f['dep'].forEach(j => {
+                if (j >= 0) desc.push('[' + f_i(program[j]['func'], j) + ']->[' + f_i(f['func'], i) + ']');
+              })
+            })
+            var source = desc.join(';\n');
+            var conf = '#direction: right\n#fill: #8fd3e8\n';
+            nomnoml.draw(document.getElementById('pred_program'), conf + source);
+            
+            // display sparql
+            sparql = sparql.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+            document.getElementById('pred_sparql').innerHTML = split_sparql(sparql);
+
+            document.getElementById('pred_result_by_program').innerHTML = 'Answer: ' + program_result;
+            document.getElementById('pred_result_by_sparql').innerHTML = 'Answer: ' + sparql_result;
+          }
+        ).catch(error => {
+          console.log(error.status, error.statusText)
+        })
+      }
+    },
+    watch:{
+      input(){
+        console.log(this.input)
+      }
+    }
+  })
+
+</script>
+
+
+</html>
